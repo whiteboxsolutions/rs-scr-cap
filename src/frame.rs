@@ -421,4 +421,52 @@ impl<'a> FrameBuffer<'a> {
 
         Ok(())
     }
+
+    /// Convert the frame buffer to a byte array (Only `ColorFormat::Rgba8` And `ColorFormat::Bgra8`)
+    pub fn to_bytes<T: AsRef<Path>>(
+        &'a mut self,
+        format: ImageFormat,
+    ) -> Result<Vec<u8>, Error> {
+        let encoder = match format {
+            ImageFormat::Jpeg => BitmapEncoder::JpegEncoderId()?,
+            ImageFormat::Png => BitmapEncoder::PngEncoderId()?,
+            ImageFormat::Gif => BitmapEncoder::GifEncoderId()?,
+            ImageFormat::Tiff => BitmapEncoder::TiffEncoderId()?,
+            ImageFormat::Bmp => BitmapEncoder::BmpEncoderId()?,
+            ImageFormat::JpegXr => BitmapEncoder::JpegXREncoderId()?,
+        };
+
+        let stream = InMemoryRandomAccessStream::new()?;
+        let encoder = BitmapEncoder::CreateAsync(encoder, &stream)?.get()?;
+
+        let pixelformat = match self.color_format {
+            ColorFormat::Bgra8 => BitmapPixelFormat::Bgra8,
+            ColorFormat::Rgba8 => BitmapPixelFormat::Rgba8,
+            ColorFormat::Rgba16F => return Err(Error::UnsupportedFormat),
+        };
+
+        encoder.SetPixelData(
+            pixelformat,
+            BitmapAlphaMode::Premultiplied,
+            self.width,
+            self.height,
+            1.0,
+            1.0,
+            self.as_raw_nopadding_buffer()?,
+        )?;
+
+        encoder.FlushAsync()?.get()?;
+
+        let buffer = Buffer::Create(u32::try_from(stream.Size()?).unwrap())?;
+        stream
+            .ReadAsync(&buffer, buffer.Capacity()?, InputStreamOptions::None)?
+            .get()?;
+
+        let data_reader = DataReader::FromBuffer(&buffer)?;
+        let length = data_reader.UnconsumedBufferLength()?;
+        let mut bytes = vec![0u8; length as usize];
+        data_reader.ReadBytes(&mut bytes).unwrap();
+
+        Ok(bytes,)
+    }
 }
